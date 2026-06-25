@@ -1,0 +1,6 @@
+{
+  "name": "Calendar App",
+  "description": "2026 Calendar App with Firebase Authentication and real-time Firestore synchronization",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

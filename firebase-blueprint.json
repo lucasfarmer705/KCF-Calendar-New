@@ -1,0 +1,57 @@
+{
+  "entities": {
+    "Event": {
+      "title": "Event",
+      "description": "An event on the calendar",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "startDate": { "type": "string", "format": "date-time" },
+        "endDate": { "type": "string", "format": "date-time" },
+        "location": { "type": "string" },
+        "allDay": { "type": "boolean" },
+        "published": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["title", "startDate", "endDate", "allDay", "published"]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "An authorized administrator",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" }
+      },
+      "required": ["email"]
+    },
+    "Invite": {
+      "title": "Invite",
+      "description": "Single-use editor invite links",
+      "type": "object",
+      "properties": {
+        "token": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "usedAt": { "type": "string", "format": "date-time" },
+        "usedBy": { "type": "string" }
+      },
+      "required": ["token", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/events/{eventId}": {
+      "schema": "Event",
+      "description": "Calendar events managed by admins"
+    },
+    "/admins/{uid}": {
+      "schema": "Admin",
+      "description": "List of admin users who can manage events"
+    },
+    "/invites/{token}": {
+      "schema": "Invite",
+      "description": "Single-use editor invite links"
+    }
+  }
+}

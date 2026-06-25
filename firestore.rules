@@ -1,0 +1,99 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (default deny catch-all)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Reusable Auth Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'lucasfarmer2008@gmail.com' ||
+        request.auth.token.email == 'Lucasfarmer2008@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // 1. Events collection matches and validation
+    match /events/{eventId} {
+      // 8. Secure List / Get Queries -- anyone can read published, admins can read any
+      allow read: if resource.data.published == true || isAdmin();
+      
+      // Admin creators and writers
+      allow create: if isAdmin() && 
+        isValidEvent(request.resource.data) &&
+        request.resource.data.createdAt == request.time;
+        
+      allow update: if isAdmin() && 
+        isValidEvent(request.resource.data) &&
+        request.resource.data.updatedAt == request.time &&
+        request.resource.data.createdAt == resource.data.createdAt; // 12. Immutability of createdAt
+        
+      allow delete: if isAdmin();
+    }
+
+    // Standalone Validation Blueprint (Anti-Update-Gap)
+    function isValidEvent(data) {
+      return data.title is string && data.title.size() <= 200 &&
+             (!('description' in data) || data.description is string && data.description.size() <= 10000) &&
+             data.startDate is timestamp && 
+             data.endDate is timestamp && 
+             (!('allDay' in data) || data.allDay is bool) &&
+             (!('location' in data) || data.location is string) &&
+             (!('published' in data) || data.published is bool);
+    }
+
+    function isValidInvite(data) {
+      return data.token is string && data.token.size() <= 128 &&
+             data.createdAt is timestamp &&
+             (!('usedAt' in data) || data.usedAt == null || data.usedAt is timestamp) &&
+             (!('usedBy' in data) || data.usedBy == null || data.usedBy is string);
+    }
+
+    // 2. Admins collection matches
+    match /admins/{uid} {
+      allow read: if isSignedIn();
+      // Block privilege escalation: Users can only write their admin record if they are the bootstrapped admin
+      // OR if they provide a valid invite that was consumed by them
+      allow write: if isSignedIn() && (
+        ((request.auth.token.email == 'lucasfarmer2008@gmail.com' || request.auth.token.email == 'Lucasfarmer2008@gmail.com') && request.auth.uid == uid) ||
+        (
+          request.auth.uid == uid &&
+          'invitedBy' in request.resource.data &&
+          exists(/databases/$(database)/documents/invites/$(request.resource.data.invitedBy)) &&
+          get(/databases/$(database)/documents/invites/$(request.resource.data.invitedBy)).data.usedBy == request.auth.uid
+        )
+      );
+    }
+
+    // 3. Invites collection matches
+    match /invites/{token} {
+      allow read: if isAdmin();
+      allow delete: if isAdmin();
+      allow create: if isAdmin() && 
+        isValidInvite(request.resource.data) &&
+        request.resource.data.createdAt == request.time;
+      allow update: if (
+        isAdmin() && 
+        isValidInvite(request.resource.data)
+      ) || (
+        isSignedIn() &&
+        request.resource.data.usedAt == request.time &&
+        request.resource.data.usedBy == request.auth.uid &&
+        resource.data.usedAt == null &&
+        request.resource.data.token == resource.data.token &&
+        request.resource.data.createdAt == resource.data.createdAt
+      );
+    }
+  }
+}
