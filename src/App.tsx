@@ -46,7 +46,8 @@ import {
   ArrowRight,
   LayoutDashboard,
   RefreshCw,
-  Search
+  Search,
+  MapPin
 } from 'lucide-react';
 
 const MONTH_NAMES = [
@@ -1305,6 +1306,7 @@ function EventEditModal({ date, event, onClose, addToast, allEvents = [] }: { da
   const [notes, setNotes] = useState(event?.notes || '');
   const [type, setType] = useState<string>(event?.type || 'event');
   const [visibility, setVisibility] = useState<string>(event?.visibility || 'public');
+  const [location, setLocation] = useState(event?.location || '');
 
   // Recurrence states
   const [isRecurring, setIsRecurring] = useState(false);
@@ -1334,7 +1336,8 @@ function EventEditModal({ date, event, onClose, addToast, allEvents = [] }: { da
       notes: notes || description || '',
       type,
       visibility,
-      date: selectedDate
+      date: selectedDate,
+      location: location.trim()
     };
 
     try {
@@ -1573,6 +1576,19 @@ function EventEditModal({ date, event, onClose, addToast, allEvents = [] }: { da
                 <Lock className="h-3.5 w-3.5" /> Private
               </button>
             </div>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-2xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1">
+              <MapPin className="h-3 w-3 text-slate-400" /> Location / Room
+            </label>
+            <input 
+              type="text" 
+              value={location}
+              onChange={e => setLocation(e.target.value)}
+              placeholder="e.g. Main Sanctuary, Fellowship Hall, Online"
+              className="w-full px-4 py-2.5 border rounded-lg bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 outline-none text-sm font-medium"
+            />
           </div>
 
           <div className="flex flex-col gap-1">
