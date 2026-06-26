@@ -192,6 +192,35 @@ export default function App() {
     }, 4500);
   };
 
+  const [copiedEvent, setCopiedEvent] = useState<any>(() => {
+    try {
+      const saved = localStorage.getItem('kcf_copied_event');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const handleCopyEvent = (event: any) => {
+    if (!event) return;
+    const cleanEvent = {
+      title: event.title || '',
+      description: event.description || event.notes || '',
+      startTime: event.startTime || null,
+      endTime: event.endTime || null,
+      color: event.color || 'blue',
+      notes: event.notes || event.description || '',
+      type: event.type || 'event',
+      visibility: event.visibility || 'public',
+      location: event.location || '',
+      allDay: event.allDay ?? !event.startTime,
+      published: event.published ?? true
+    };
+    setCopiedEvent(cleanEvent);
+    localStorage.setItem('kcf_copied_event', JSON.stringify(cleanEvent));
+    addToast("Event copied to clipboard!", "success");
+  };
+
   if (!authReady) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-50 dark:bg-zinc-950">
@@ -232,6 +261,9 @@ export default function App() {
         addToast={addToast}
         logout={() => signOut(auth)}
         toasts={toasts}
+        copiedEvent={copiedEvent}
+        setCopiedEvent={setCopiedEvent}
+        onCopyEvent={handleCopyEvent}
       />
     );
   }
@@ -251,6 +283,9 @@ export default function App() {
         theme={theme}
         setTheme={setTheme}
         toasts={toasts}
+        copiedEvent={copiedEvent}
+        setCopiedEvent={setCopiedEvent}
+        onCopyEvent={handleCopyEvent}
       />
     );
   }
@@ -634,16 +669,6 @@ function PublicCalendarView({
                 <span className="pub-print-label">Print</span>
               </button>
 
-              {/* Theme Toggle Button */}
-              <button 
-                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} 
-                aria-label="Toggle dark mode" 
-                style={{ width: 34, height: 34, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid hsl(var(--color-border))", background: "hsl(var(--color-surface-offset, var(--color-surface)))", color: "hsl(var(--color-text-muted))", cursor: "pointer", flexShrink: 0 }}
-                className="flex items-center justify-center"
-              >
-                {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-              </button>
-
               {/* Original Admin Login or Dashboard Access Point */}
               {user && isAdmin ? (
                 <button 
@@ -903,15 +928,6 @@ function AdminSidebar({
                 <Printer className="h-3.5 w-3.5 shrink-0 text-slate-400" />
                 <span>Print</span>
               </button>
-
-              {/* Dark Mode */}
-              <button
-                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-                className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium tracking-tight text-slate-400 hover:text-white hover:bg-[#1e293b]/40 transition duration-200 text-left cursor-pointer ease-in-out"
-              >
-                {theme === 'dark' ? <Sun className="h-3.5 w-3.5 shrink-0 text-slate-400" /> : <Moon className="h-3.5 w-3.5 shrink-0 text-slate-400" />}
-                <span>Dark Mode</span>
-              </button>
             </div>
           </div>
 
@@ -979,7 +995,10 @@ function AdminInteractiveView({
   setTheme,
   addToast,
   logout,
-  toasts
+  toasts,
+  copiedEvent,
+  setCopiedEvent,
+  onCopyEvent
 }: any) {
   const [activeModal, setActiveModal] = useState<any>(null); // { date, event } or null
   const [yearDropdownOpen, setYearDropdownOpen] = useState(false);
@@ -1174,9 +1193,33 @@ function AdminInteractiveView({
                           }`}>
                             {dayNum}
                           </span>
-                          <span className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded bg-slate-100/50 dark:bg-[#111c2a] text-slate-500 dark:text-slate-400 border border-slate-200/30 dark:border-slate-800">
-                            <Plus className="h-3 w-3" />
-                          </span>
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {copiedEvent && (
+                              <button
+                                type="button"
+                                title={`Paste copied event: "${copiedEvent.title}"`}
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  try {
+                                    const pastedPayload = {
+                                      ...copiedEvent,
+                                      date: dateStr,
+                                    };
+                                    await createEvent(pastedPayload);
+                                    addToast(`Event "${copiedEvent.title}" pasted successfully!`, "success");
+                                  } catch (err: any) {
+                                    addToast(err.message || "Failed to paste event", "error");
+                                  }
+                                }}
+                                className="p-0.5 rounded bg-sky-50 dark:bg-sky-950/40 text-[#0091ff] dark:text-sky-400 border border-sky-100 dark:border-sky-900/30 hover:scale-105 active:scale-95 transition cursor-pointer"
+                              >
+                                <FolderPlus className="h-3 w-3" />
+                              </button>
+                            )}
+                            <span className="p-0.5 rounded bg-slate-100/50 dark:bg-[#111c2a] text-slate-500 dark:text-slate-400 border border-slate-200/30 dark:border-slate-800">
+                              <Plus className="h-3 w-3" />
+                            </span>
+                          </div>
                         </div>
                         <div className="flex-1 flex flex-col gap-1 overflow-y-auto max-h-[65px] sm:max-h-[85px] scrollbar-none pr-0">
                           {dayEvents.map(ev => {
@@ -1224,6 +1267,9 @@ function AdminInteractiveView({
           onClose={() => setActiveModal(null)}
           addToast={addToast}
           allEvents={events}
+          copiedEvent={copiedEvent}
+          setCopiedEvent={setCopiedEvent}
+          onCopyEvent={onCopyEvent}
         />
       )}
 
@@ -1297,7 +1343,25 @@ function getRecurringDates(startDateStr: string, pattern: string, count: number)
 }
 
 // ── SUB-COMPONENT: Live Event Edit / Creation Modal ──
-function EventEditModal({ date, event, onClose, addToast, allEvents = [] }: { date: string, event: any, onClose: () => void, addToast: any, allEvents?: any[] }) {
+function EventEditModal({ 
+  date, 
+  event, 
+  onClose, 
+  addToast, 
+  allEvents = [],
+  copiedEvent,
+  setCopiedEvent,
+  onCopyEvent
+}: { 
+  date: string, 
+  event: any, 
+  onClose: () => void, 
+  addToast: any, 
+  allEvents?: any[],
+  copiedEvent?: any,
+  setCopiedEvent?: any,
+  onCopyEvent?: any
+}) {
   const [title, setTitle] = useState(event?.title || '');
   const [description, setDescription] = useState(event?.description || '');
   const [startTime, setStartTime] = useState(event?.startTime || '');
@@ -1419,6 +1483,26 @@ function EventEditModal({ date, event, onClose, addToast, allEvents = [] }: { da
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+          {copiedEvent && !event && (
+            <button
+              type="button"
+              onClick={() => {
+                setTitle(copiedEvent.title || '');
+                setDescription(copiedEvent.description || '');
+                setStartTime(copiedEvent.startTime || '');
+                setEndTime(copiedEvent.endTime || '');
+                setColor(copiedEvent.color || 'blue');
+                setNotes(copiedEvent.notes || '');
+                setType(copiedEvent.type || 'event');
+                setVisibility(copiedEvent.visibility || 'public');
+                setLocation(copiedEvent.location || '');
+                addToast("Event details pasted from clipboard!", "success");
+              }}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 border border-dashed border-sky-300 dark:border-sky-800/80 bg-sky-50/50 dark:bg-sky-950/10 text-sky-600 dark:text-sky-400 rounded-lg text-xs font-semibold hover:bg-sky-50 dark:hover:bg-sky-950/20 cursor-pointer transition duration-150"
+            >
+              <Copy className="h-3.5 w-3.5" /> Paste Event Details from Clipboard
+            </button>
+          )}
           {/* Calendar type toggler */}
           <div className="flex gap-2 p-1 bg-slate-100 dark:bg-zinc-850 rounded-lg">
             <button 
@@ -1637,20 +1721,33 @@ function EventEditModal({ date, event, onClose, addToast, allEvents = [] }: { da
             ) : (
               <div className="flex justify-between gap-3 items-center w-full">
                 {event && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (event.recurrenceGroupId) {
-                        setDeleteMode('prompt');
-                      } else {
-                        handleDeleteSingle();
-                      }
-                    }}
-                    disabled={saving}
-                    className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg border border-red-200 hover:bg-red-50 text-red-600 dark:border-red-900/30 dark:hover:bg-red-950/20 text-xs font-semibold cursor-pointer"
-                  >
-                    <Trash2 className="h-4 w-4" /> Delete Item
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (onCopyEvent) {
+                          onCopyEvent(event);
+                        }
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-850 text-slate-700 dark:text-zinc-200 hover:bg-slate-50 dark:hover:bg-zinc-800 text-xs font-semibold cursor-pointer transition"
+                    >
+                      <Copy className="h-4 w-4" /> Copy
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (event.recurrenceGroupId) {
+                          setDeleteMode('prompt');
+                        } else {
+                          handleDeleteSingle();
+                        }
+                      }}
+                      disabled={saving}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-red-200 hover:bg-red-50 text-red-600 dark:border-red-900/30 dark:hover:bg-red-950/20 text-xs font-semibold cursor-pointer transition"
+                    >
+                      <Trash2 className="h-4 w-4" /> Delete Item
+                    </button>
+                  </div>
                 )}
                 <div className="flex gap-2 ml-auto">
                   <button 
@@ -1687,7 +1784,10 @@ function AdminDashboardView({
   logout,
   theme,
   setTheme,
-  toasts
+  toasts,
+  copiedEvent,
+  setCopiedEvent,
+  onCopyEvent
 }: any) {
   const [activeTab, setActiveTab] = useState<'events' | 'invites'>(initialTab);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -2063,6 +2163,9 @@ function AdminDashboardView({
           onClose={() => setActiveModal(null)} 
           addToast={addToast} 
           allEvents={events}
+          copiedEvent={copiedEvent}
+          setCopiedEvent={setCopiedEvent}
+          onCopyEvent={onCopyEvent}
         />
       )}
     </div>
