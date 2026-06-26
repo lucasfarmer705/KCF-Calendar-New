@@ -67,11 +67,11 @@ function ChurchLogo({ className = "h-10 w-10" }: { className?: string }) {
       xmlns="http://www.w3.org/2000/svg"
     >
       <circle cx="50" cy="50" r="50" fill="#203656" />
-      <path d="M17.5 69 H82.5" stroke="white" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M43.5 69 V61 A6.5 6.5 0 0 1 56.5 61 V69" stroke="white" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M24 68.5 L50 48.5 L76 68.5" stroke="white" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M37 57 V45 L50 32.5 L63 45 V57" stroke="white" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M50 32.5 V17.5 M45 23.5 H55" stroke="white" strokeWidth="4.5" strokeLinecap="round" />
+      <path d="M17.5 69 H82.5" stroke="white" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M45 69 V64.5 A5 5 0 0 1 55 64.5 V69" stroke="white" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M24 68.5 L50 48.5 L76 68.5" stroke="white" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M37 57 V45 L50 32.5 L63 45 V57" stroke="white" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M50 32.5 V17.5 M45 23.5 H55" stroke="white" strokeWidth="3.2" strokeLinecap="round" />
     </svg>
   );
 }
@@ -80,7 +80,13 @@ export default function App() {
   // Routes & Themes
   const [hash, setHash] = useState(window.location.hash || '#/');
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    return (localStorage.getItem('kcf_theme') as 'light' | 'dark') || 'light';
+    // Force the app back to 'light' mode as requested, but allow toggle.
+    const saved = localStorage.getItem('kcf_theme');
+    if (saved === 'dark') {
+      localStorage.setItem('kcf_theme', 'light');
+      return 'light';
+    }
+    return (saved as 'light' | 'dark') || 'light';
   });
 
   // Auth States
@@ -538,59 +544,92 @@ function AcceptInviteView({ token, onAccept }: { token: string, onAccept: (role:
 // ── SUB-COMPONENT: Public Event Details drawer modal ──
 function PublicEventDetailModal({ event, onClose }: { event: any, onClose: () => void }) {
   const colors: Record<string, string> = {
-    blue: 'border-blue-500 bg-blue-50/50 text-blue-900 dark:bg-blue-950/20 dark:text-blue-100',
-    teal: 'border-teal-500 bg-teal-50/50 text-teal-900 dark:bg-teal-950/20 dark:text-teal-100',
-    green: 'border-green-500 bg-green-50/50 text-green-900 dark:bg-green-950/20 dark:text-green-100',
-    amber: 'border-amber-500 bg-amber-50/50 text-amber-900 dark:bg-amber-950/20 dark:text-amber-100',
-    rose: 'border-rose-500 bg-rose-50/50 text-rose-900 dark:bg-rose-950/20 dark:text-rose-100',
-    purple: 'border-purple-500 bg-purple-50/50 text-purple-900 dark:bg-purple-950/20 dark:text-purple-100',
+    blue: 'border-blue-500 bg-blue-50/40 text-blue-950 dark:bg-blue-950/20 dark:text-blue-200',
+    teal: 'border-teal-500 bg-teal-50/40 text-teal-950 dark:bg-teal-950/20 dark:text-teal-200',
+    green: 'border-green-500 bg-green-50/40 text-green-950 dark:bg-green-950/20 dark:text-green-200',
+    amber: 'border-amber-500 bg-amber-50/40 text-amber-950 dark:bg-amber-950/20 dark:text-amber-200',
+    rose: 'border-rose-500 bg-rose-50/40 text-rose-950 dark:bg-rose-950/20 dark:text-rose-200',
+    purple: 'border-purple-500 bg-purple-50/40 text-purple-950 dark:bg-purple-950/20 dark:text-purple-200',
   };
 
   const badgeColor = colors[event.color || 'blue'] || colors.blue;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="w-full max-w-sm bg-white dark:bg-zinc-900 border dark:border-zinc-800 rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom duration-300">
-        <div className="px-5 py-4 border-b dark:border-zinc-800 flex justify-between items-center bg-slate-50 dark:bg-zinc-900/50">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-in fade-in duration-200">
+      <div className="w-full max-w-sm bg-white dark:bg-zinc-900 border border-slate-100 dark:border-zinc-800 rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-4 duration-300">
+        
+        {/* Header section with Badge & Date */}
+        <div className="px-6 py-5 border-b border-slate-100 dark:border-zinc-800 flex justify-between items-start bg-slate-50/50 dark:bg-zinc-900/50">
           <div>
-            <span className="text-3xs font-extrabold uppercase tracking-widest px-2 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
+            <span className="font-display text-[10px] font-extrabold uppercase tracking-widest px-2.5 py-1 rounded-md bg-zinc-200/60 dark:bg-zinc-850 text-zinc-600 dark:text-zinc-400">
               {event.type || 'Event'}
             </span>
-            <p className="text-xs text-slate-500 mt-1">{event.date}</p>
+            <p className="font-display font-medium text-xs text-slate-400 dark:text-zinc-500 mt-2">{event.date}</p>
           </div>
-          <button onClick={onClose} className="p-1 rounded bg-slate-200 dark:bg-zinc-800 text-slate-500 hover:text-slate-800 dark:hover:text-zinc-300">
+          <button 
+            onClick={onClose} 
+            aria-label="Close"
+            className="text-slate-400 hover:text-slate-700 dark:text-zinc-500 dark:hover:text-zinc-300 text-sm font-medium transition cursor-pointer p-1"
+          >
             ✕
           </button>
         </div>
 
-        <div className="p-5 space-y-3">
-          <div className="flex flex-col gap-1">
-            <h3 className="text-base font-bold text-slate-950 dark:text-zinc-50 leading-snug">{event.title}</h3>
-            {event.startTime && (
-              <p className="text-xs font-semibold text-[#0091ff] dark:text-sky-400 flex items-center gap-1.5 mt-1">
-                📅 &nbsp;{formatTime(event.startTime)} {event.endTime ? `to ${formatTime(event.endTime)}` : ''}
-              </p>
-            )}
+        {/* Core Content Body */}
+        <div className="p-6 space-y-4">
+          <div className="space-y-1">
+            <h3 className="font-display text-lg font-bold text-slate-900 dark:text-zinc-50 leading-snug tracking-tight">
+              {event.title}
+            </h3>
           </div>
 
-          {(event.description || event.notes) && (
-            <div className={`p-3.5 rounded-xl border-l-4 text-xs ${badgeColor}`}>
-              <p className="whitespace-pre-line leading-relaxed">{event.description || event.notes}</p>
+          {/* Time block */}
+          {event.startTime && (
+            <div className="space-y-1">
+              <span className="block font-display text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-zinc-500">
+                Time
+              </span>
+              <p className="font-sans text-sm font-semibold text-sky-600 dark:text-sky-400">
+                {formatTime(event.startTime)}{event.endTime ? ` – ${formatTime(event.endTime)}` : ''}
+              </p>
             </div>
           )}
 
+          {/* Description Block */}
+          {(event.description || event.notes) && (
+            <div className="space-y-1.5 pt-1">
+              <span className="block font-display text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-zinc-500">
+                Details
+              </span>
+              <div className={`p-3.5 rounded-xl border-l-3 font-sans text-xs leading-relaxed ${badgeColor}`}>
+                <p className="whitespace-pre-line">{event.description || event.notes}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Location Block */}
           {event.location && (
-            <div className="text-3xs text-slate-500 dark:text-zinc-400 flex items-center gap-1 mt-1 font-mono">
-              📍 &nbsp;SITE: <span className="font-semibold">{event.location}</span>
+            <div className="space-y-1 pt-1">
+              <span className="block font-display text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-zinc-500">
+                Location
+              </span>
+              <p className="font-sans text-sm font-semibold text-slate-800 dark:text-zinc-200">
+                {event.location}
+              </p>
             </div>
           )}
         </div>
 
-        <div className="px-5 py-3 border-t dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/30 flex justify-end">
-          <button onClick={onClose} className="px-3.5 py-1.5 bg-slate-900 text-white dark:bg-zinc-100 dark:text-zinc-950 text-xs font-bold rounded-lg hover:opacity-90">
+        {/* Footer Area with premium button */}
+        <div className="px-6 py-4 border-t border-slate-100 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/30 flex justify-end">
+          <button 
+            onClick={onClose} 
+            className="px-5 py-2.5 bg-slate-950 dark:bg-white text-white dark:text-zinc-950 text-xs font-bold font-display rounded-xl hover:opacity-90 active:scale-[0.98] transition shadow-xs cursor-pointer"
+          >
             Close
           </button>
         </div>
+
       </div>
     </div>
   );
@@ -667,6 +706,20 @@ function PublicCalendarView({
               >
                 <Printer className="h-4 w-4 text-slate-400 dark:text-zinc-400" />
                 <span className="pub-print-label">Print</span>
+              </button>
+
+              {/* Theme Toggle Button */}
+              <button 
+                onClick={() => setTheme((t: 'light' | 'dark') => t === 'dark' ? 'light' : 'dark')} 
+                aria-label="Toggle theme" 
+                title="Toggle theme" 
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, borderRadius: "var(--radius)", border: "1px solid hsl(var(--color-border))", background: "hsl(var(--color-surface-offset, var(--color-surface)))", color: "hsl(var(--color-text-muted))", cursor: "pointer", flexShrink: 0 }}
+              >
+                {theme === 'dark' ? (
+                  <Sun className="h-4 w-4 text-amber-500" />
+                ) : (
+                  <Moon className="h-4 w-4 text-slate-500" />
+                )}
               </button>
 
               {/* Original Admin Login or Dashboard Access Point */}
@@ -969,12 +1022,27 @@ function AdminSidebar({
           </div>
         </div>
         
-        <button
-          onClick={logout}
-          className="flex w-full items-center justify-center gap-2 rounded-lg border border-[#1e293b] bg-transparent hover:bg-[#1e293b]/50 py-2 text-xs font-semibold text-slate-400 hover:text-white transition duration-200 cursor-pointer ease-in-out"
-        >
-          <LogOut className="h-3.5 w-3.5" /> Sign Out
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={logout}
+            className="flex-1 flex items-center justify-center gap-2 rounded-lg border border-[#1e293b] bg-transparent hover:bg-[#1e293b]/50 py-2.5 text-xs font-semibold text-slate-400 hover:text-white transition duration-200 cursor-pointer ease-in-out"
+          >
+            <LogOut className="h-3.5 w-3.5" /> Sign Out
+          </button>
+          
+          <button
+            type="button"
+            onClick={() => setTheme((t: 'light' | 'dark') => t === 'dark' ? 'light' : 'dark')}
+            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+            className="px-3 rounded-lg border border-[#1e293b] bg-transparent hover:bg-[#1e293b]/50 text-slate-400 hover:text-white transition duration-200 cursor-pointer ease-in-out flex items-center justify-center"
+          >
+            {theme === 'dark' ? (
+              <Sun className="h-4 w-4 text-amber-500" />
+            ) : (
+              <Moon className="h-4 w-4" />
+            )}
+          </button>
+        </div>
       </div>
     </aside>
   );
@@ -1055,26 +1123,17 @@ function AdminInteractiveView({
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 lg:pl-64">
-        <header className="border-b border-slate-200 dark:border-slate-800/60 bg-white/95 dark:bg-[#0d1624] text-slate-900 dark:text-white backdrop-blur-md px-8 py-5 flex items-center justify-between gap-4 sticky top-0 z-20">
-          <div className="flex items-center gap-3">
+        <main className="max-w-[1400px] w-full mx-auto p-4 md:p-6 lg:p-8 flex-1 flex flex-col justify-start">
+          {/* Mobile menu trigger */}
+          <div className="lg:hidden mb-4">
             <button 
               onClick={() => setMobileMenuOpen(true)}
-              className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 lg:hidden hover:bg-slate-50 dark:hover:bg-[#111c2a] transition-all duration-200 cursor-pointer"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0d1624] text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-[#111c2a] transition-all duration-200 cursor-pointer shadow-xs"
             >
-              <Menu className="h-5 w-5" />
+              <Menu className="h-4 w-4" />
+              <span>Menu</span>
             </button>
-            <h1 className="font-display font-semibold text-lg md:text-xl tracking-tight text-slate-900 dark:text-white leading-none">Admin Dashboard</h1>
           </div>
-
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-2xs font-semibold tracking-tight bg-slate-50 dark:bg-[#162231]/85 text-slate-600 dark:text-slate-300 border border-slate-200/60 dark:border-slate-800 shadow-2xs">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#0091ff] animate-pulse" />
-              {events.length} Live Events
-            </span>
-          </div>
-        </header>
-
-        <main className="max-w-[1400px] w-full mx-auto p-4 md:p-6 lg:p-8 flex-1 flex flex-col justify-start">
           
           {/* Calendar Header with Navigation on the Sides */}
           <div className="w-full max-w-[1400px] mx-auto mb-8">
@@ -1372,11 +1431,41 @@ function EventEditModal({
   const [visibility, setVisibility] = useState<string>(event?.visibility || 'public');
   const [location, setLocation] = useState(event?.location || '');
 
+  const ON_SITE_LOCATIONS = [
+    "Sanctuary",
+    "Fellowship Hall",
+    "Hospitality Room",
+    "South Classroom",
+    "North Classroom"
+  ];
+
+  const [locationType, setLocationType] = useState<'onsite' | 'custom'>(() => {
+    if (!event?.location) return 'onsite';
+    return ON_SITE_LOCATIONS.includes(event.location) ? 'onsite' : 'custom';
+  });
+
+  const handleLocationTypeChange = (type: 'onsite' | 'custom') => {
+    setLocationType(type);
+    if (type === 'onsite') {
+      setLocation('Sanctuary');
+    } else {
+      setLocation('');
+    }
+  };
+
+  useEffect(() => {
+    if (location) {
+      const isOnSite = ON_SITE_LOCATIONS.includes(location);
+      setLocationType(isOnSite ? 'onsite' : 'custom');
+    }
+  }, [location]);
+
   // Recurrence states
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurrencePattern, setRecurrencePattern] = useState('weekly');
   const [recurrenceCount, setRecurrenceCount] = useState(10);
   const [deleteMode, setDeleteMode] = useState<'prompt' | null>(null);
+  const [saveMode, setSaveMode] = useState<'prompt' | null>(null);
 
   const [saving, setSaving] = useState(false);
 
@@ -1387,6 +1476,11 @@ function EventEditModal({
     e.preventDefault();
     if (!title.trim()) {
       addToast("Title is required", "error");
+      return;
+    }
+
+    if (event && event.recurrenceGroupId) {
+      setSaveMode('prompt');
       return;
     }
 
@@ -1433,6 +1527,70 @@ function EventEditModal({
       addToast(e.message || "Failed to commit operation", "error");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSaveSingle = async () => {
+    if (!event) return;
+    setSaving(true);
+    const payload = {
+      title: title.trim(),
+      description: description || notes || '',
+      startTime: startTime || null,
+      endTime: endTime || null,
+      color,
+      notes: notes || description || '',
+      type,
+      visibility,
+      date: selectedDate,
+      location: location.trim(),
+      recurrenceGroupId: event.recurrenceGroupId
+    };
+
+    try {
+      await updateEvent(event.id, payload);
+      addToast("This event was updated successfully!");
+      onClose();
+    } catch (e: any) {
+      addToast(e.message || "Failed to update event", "error");
+    } finally {
+      setSaving(false);
+      setSaveMode(null);
+    }
+  };
+
+  const handleSaveSeries = async () => {
+    if (!event || !event.recurrenceGroupId) return;
+    setSaving(true);
+    const payload = {
+      title: title.trim(),
+      description: description || notes || '',
+      startTime: startTime || null,
+      endTime: endTime || null,
+      color,
+      notes: notes || description || '',
+      type,
+      visibility,
+      location: location.trim(),
+      recurrenceGroupId: event.recurrenceGroupId
+    };
+
+    try {
+      const seriesEvents = allEvents.filter((e: any) => e.recurrenceGroupId === event.recurrenceGroupId);
+      for (const seriesEv of seriesEvents) {
+        const seriesPayload = {
+          ...payload,
+          date: seriesEv.date || (seriesEv.startDate ? seriesEv.startDate.toDate().toISOString().substring(0, 10) : '')
+        };
+        await updateEvent(seriesEv.id, seriesPayload);
+      }
+      addToast(`All ${seriesEvents.length} events in this series updated successfully!`);
+      onClose();
+    } catch (e: any) {
+      addToast(e.message || "Failed to update series", "error");
+    } finally {
+      setSaving(false);
+      setSaveMode(null);
     }
   };
 
@@ -1662,17 +1820,68 @@ function EventEditModal({
             </div>
           </div>
 
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-2">
             <label className="text-2xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1">
               <MapPin className="h-3 w-3 text-slate-400" /> Location / Room
             </label>
-            <input 
-              type="text" 
-              value={location}
-              onChange={e => setLocation(e.target.value)}
-              placeholder="e.g. Main Sanctuary, Fellowship Hall, Online"
-              className="w-full px-4 py-2.5 border rounded-lg bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 outline-none text-sm font-medium"
-            />
+            
+            {/* Segmented toggle for location type */}
+            <div className="flex gap-1.5 p-1 bg-slate-100 dark:bg-zinc-850 rounded-lg text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => handleLocationTypeChange('onsite')}
+                className={`flex-1 py-1.5 rounded-md transition duration-150 cursor-pointer text-center ${
+                  locationType === 'onsite' 
+                    ? 'bg-white shadow dark:bg-zinc-800 text-slate-900 dark:text-zinc-50 font-bold' 
+                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-zinc-300'
+                }`}
+              >
+                On-Site Room
+              </button>
+              <button
+                type="button"
+                onClick={() => handleLocationTypeChange('custom')}
+                className={`flex-1 py-1.5 rounded-md transition duration-150 cursor-pointer text-center ${
+                  locationType === 'custom' 
+                    ? 'bg-white shadow dark:bg-zinc-800 text-slate-900 dark:text-zinc-50 font-bold' 
+                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-zinc-300'
+                }`}
+              >
+                Custom Address / Off-Site
+              </button>
+            </div>
+
+            {locationType === 'onsite' ? (
+              <div className="grid grid-cols-2 gap-2 mt-1">
+                {ON_SITE_LOCATIONS.map((loc, idx) => {
+                  const isSelected = location === loc;
+                  return (
+                    <button
+                      key={loc}
+                      type="button"
+                      onClick={() => setLocation(loc)}
+                      className={`px-3 py-2.5 rounded-lg border text-xs font-semibold text-center transition-all cursor-pointer ${
+                        idx === 4 ? 'col-span-2' : ''
+                      } ${
+                        isSelected 
+                          ? 'bg-sky-50/70 dark:bg-sky-950/20 border-sky-400 dark:border-sky-800 text-sky-600 dark:text-sky-400 font-bold shadow-xs'
+                          : 'bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-750/50'
+                      }`}
+                    >
+                      {loc}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <input 
+                type="text" 
+                value={location}
+                onChange={e => setLocation(e.target.value)}
+                placeholder="e.g. 123 Main St, or Zoom Link..."
+                className="w-full px-4 py-2.5 border rounded-lg bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 outline-none text-sm font-medium focus:border-sky-500 transition"
+              />
+            )}
           </div>
 
           <div className="flex flex-col gap-1">
@@ -1687,7 +1896,38 @@ function EventEditModal({
           </div>
 
           <div className="pt-4 border-t dark:border-zinc-800 flex flex-col gap-3">
-            {event && event.recurrenceGroupId && deleteMode === 'prompt' ? (
+            {event && event.recurrenceGroupId && saveMode === 'prompt' ? (
+              <div className="w-full bg-slate-50 dark:bg-zinc-950/30 p-4 rounded-xl border border-slate-200 dark:border-zinc-850 text-center space-y-3 animate-in fade-in duration-150">
+                <p className="text-xs font-bold text-slate-700 dark:text-zinc-300">
+                  This is a recurring event. How would you like to save your edits?
+                </p>
+                <div className="flex justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSaveSingle}
+                    disabled={saving}
+                    className="px-3.5 py-1.5 bg-[#0091ff] hover:bg-[#007ee6] text-white text-xs font-semibold rounded-md transition cursor-pointer"
+                  >
+                    Only This Event
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveSeries}
+                    disabled={saving}
+                    className="px-3.5 py-1.5 bg-sky-800 hover:bg-sky-900 text-white text-xs font-semibold rounded-md transition cursor-pointer"
+                  >
+                    All Recurring Events ({allEvents.filter((e: any) => e.recurrenceGroupId === event.recurrenceGroupId).length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSaveMode(null)}
+                    className="px-3 py-1.5 border dark:border-zinc-800 text-xs font-semibold rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-500 dark:text-zinc-400 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : event && event.recurrenceGroupId && deleteMode === 'prompt' ? (
               <div className="w-full bg-slate-50 dark:bg-zinc-950/30 p-4 rounded-xl border border-slate-200 dark:border-zinc-850 text-center space-y-3">
                 <p className="text-xs font-bold text-slate-700 dark:text-zinc-300">
                   This is a recurring event. How would you like to delete?
@@ -1900,29 +2140,18 @@ function AdminDashboardView({
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 lg:pl-64">
-        <header className="border-b border-slate-200 dark:border-slate-800/60 bg-white/95 dark:bg-[#0d1624] text-slate-900 dark:text-white backdrop-blur-md px-8 py-5 flex items-center justify-between gap-4 sticky top-0 z-20">
-          <div className="flex items-center gap-3">
+        <main className="max-w-6xl mx-auto w-full p-4 md:p-6 flex-1">
+          {/* Mobile menu trigger */}
+          <div className="lg:hidden mb-4">
             <button 
               onClick={() => setMobileMenuOpen(true)}
-              className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 lg:hidden hover:bg-slate-50 dark:hover:bg-[#111c2a] transition-all duration-200 cursor-pointer"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0d1624] text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-[#111c2a] transition-all duration-200 cursor-pointer shadow-xs"
             >
-              <Menu className="h-5 w-5" />
+              <Menu className="h-4 w-4" />
+              <span>Menu</span>
             </button>
-            <h1 className="font-display font-semibold text-lg md:text-xl tracking-tight text-slate-900 dark:text-white leading-none">Admin Dashboard</h1>
           </div>
-
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-2xs font-semibold tracking-tight bg-slate-50 dark:bg-[#162231]/85 text-slate-600 dark:text-slate-300 border border-slate-200/60 dark:border-slate-800 shadow-2xs">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#0091ff] animate-pulse" />
-              {events.length} Live Events
-            </span>
-          </div>
-        </header>
-
-
-
-        <main className="max-w-6xl mx-auto w-full p-4 md:p-6 flex-1">
-        {activeTab === 'events' ? (
+          {activeTab === 'events' ? (
           <div className="space-y-6">
             {/* Filter controls + CSV */}
             <div className="bg-white dark:bg-[#0d1624] p-6 rounded-2xl border border-slate-200/50 dark:border-slate-800/60 flex flex-col md:flex-row gap-4 items-center justify-between shadow-[0_4px_20px_rgba(15,23,42,0.02)]">
