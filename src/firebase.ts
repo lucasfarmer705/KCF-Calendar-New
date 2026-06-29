@@ -241,13 +241,17 @@ export async function deleteEvent(id: string) {
 export async function setupAdminProfileIfRequired(user: any) {
   if (!user) return false;
   
-  const isBootstrappedAdmin = user.email && user.email.toLowerCase() === 'lucasfarmer2008@gmail.com';
+  const isBootstrappedAdmin = user.email && (user.email.toLowerCase() === 'lucasfarmer2008@gmail.com' || user.email.toLowerCase() === 'lucasfarmer2008@gmail.com');
   const adminDocRef = doc(db, 'admins', user.uid);
   
   if (isBootstrappedAdmin) {
     try {
       await setDoc(adminDocRef, {
         email: user.email,
+        name: user.displayName || 'Lucas Farmer',
+        photoURL: user.photoURL || '',
+        role: 'owner',
+        status: 'Active',
         seededAt: serverTimestamp()
       }, { merge: true });
       return true;

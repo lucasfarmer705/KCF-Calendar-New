@@ -12,7 +12,7 @@ import {
   handleFirestoreError,
   OperationType
 } from './firebase';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { 
   collection, 
   onSnapshot, 
@@ -21,11 +21,16 @@ import {
   doc, 
   serverTimestamp, 
   updateDoc,
-  setDoc
+  setDoc,
+  getDoc,
+  query,
+  where,
+  getDocs
 } from 'firebase/firestore';
 import { 
   Calendar as CalendarIcon, 
   Users, 
+  UserPlus,
   Printer, 
   Moon, 
   Sun, 
@@ -47,7 +52,11 @@ import {
   LayoutDashboard,
   RefreshCw,
   Search,
-  MapPin
+  MapPin,
+  Shield,
+  Key,
+  MoreVertical,
+  X
 } from 'lucide-react';
 
 const MONTH_NAMES = [
@@ -92,12 +101,14 @@ export default function App() {
   // Auth States
   const [user, setUser] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [userRole, setUserRole] = useState<'owner' | 'admin' | 'editor' | null>(null);
   const [authReady, setAuthReady] = useState<boolean>(false);
 
   // Live Sync States
   const [events, setEvents] = useState<any[]>([]);
   const [eventsLoading, setEventsLoading] = useState<boolean>(true);
   const [invites, setInvites] = useState<any[]>([]);
+  const [admins, setAdmins] = useState<any[]>([]);
 
   // Toast System
   const [toasts, setToasts] = useState<any[]>([]);
@@ -133,11 +144,45 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
         setUser(currentUser);
-        const adminStatus = await setupAdminProfileIfRequired(currentUser);
-        setIsAdmin(adminStatus);
+        // Boostrap if needed
+        await setupAdminProfileIfRequired(currentUser);
+        
+        // Fetch Admin/Editor Profile
+        try {
+          const adminDocRef = doc(db, 'admins', currentUser.uid);
+          const adminDocSnap = await getDoc(adminDocRef);
+          if (adminDocSnap.exists()) {
+            const data = adminDocSnap.data();
+            const role = data.role || (currentUser.email?.toLowerCase() === 'lucasfarmer2008@gmail.com' ? 'owner' : 'admin');
+            setUserRole(role);
+            setIsAdmin(true);
+            
+            // Periodically refresh/update activeAt field for user activity tracking
+            await updateDoc(adminDocRef, { activeAt: serverTimestamp() }).catch(() => {});
+          } else {
+            // Check if bootstrapped email fallback
+            if (currentUser.email?.toLowerCase() === 'lucasfarmer2008@gmail.com') {
+              setUserRole('owner');
+              setIsAdmin(true);
+            } else {
+              setUserRole(null);
+              setIsAdmin(false);
+            }
+          }
+        } catch (e) {
+          console.error("Error loading admin role:", e);
+          if (currentUser.email?.toLowerCase() === 'lucasfarmer2008@gmail.com') {
+            setUserRole('owner');
+            setIsAdmin(true);
+          } else {
+            setUserRole(null);
+            setIsAdmin(false);
+          }
+        }
       } else {
         setUser(null);
         setIsAdmin(false);
+        setUserRole(null);
       }
       setAuthReady(true);
     });
@@ -184,6 +229,27 @@ export default function App() {
       setInvites(list);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'invites');
+    });
+
+    return unsubscribe;
+  }, [isAdmin]);
+
+  // Live Subscription to authorized admin users
+  useEffect(() => {
+    if (!isAdmin) {
+      setAdmins([]);
+      return;
+    }
+
+    const adminsCol = collection(db, 'admins');
+    const unsubscribe = onSnapshot(adminsCol, (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setAdmins(list);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'admins');
     });
 
     return unsubscribe;
@@ -254,6 +320,7 @@ export default function App() {
     return (
       <AdminInteractiveView 
         user={user}
+        userRole={userRole}
         events={events}
         invites={invites}
         selectedMonth={selectedMonth}
@@ -278,12 +345,19 @@ export default function App() {
     if (!isAdmin) {
       return <LoginScreen onLoginSuccess={() => { window.location.hash = hash; }} addToast={addToast} />;
     }
+    // Block editor from accessing admin-users
+    if (hash === '#/admin-users' && userRole === 'editor') {
+      window.location.hash = '#/dashboard';
+      return null;
+    }
     return (
       <AdminDashboardView 
         user={user}
+        userRole={userRole}
         events={events}
         invites={invites}
-        initialTab={hash === '#/admin-users' ? 'invites' : 'events'}
+        admins={admins}
+        initialTab={hash === '#/admin-users' ? 'users' : 'events'}
         addToast={addToast}
         logout={() => signOut(auth)}
         theme={theme}
@@ -421,6 +495,8 @@ function PrintMonthLayout({ month, year, events }: { month: number, year: number
 // ── SUB-COMPONENT: Login Screen ──
 function LoginScreen({ onLoginSuccess, addToast }: { onLoginSuccess: () => void, addToast: any }) {
   const [signingIn, setSigningIn] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
   const handleSignIn = async () => {
     setSigningIn(true);
@@ -437,6 +513,91 @@ function LoginScreen({ onLoginSuccess, addToast }: { onLoginSuccess: () => void,
     }
   };
 
+  const handleEmailSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim() || !password.trim()) {
+      addToast("Please enter both email and password.", "error");
+      return;
+    }
+    setSigningIn(true);
+    const trimmedEmail = email.toLowerCase().trim();
+    const cleanPassword = password.trim();
+
+    try {
+      // 1. Try standard sign-in first (if user is already created in Firebase Auth)
+      try {
+        const result = await signInWithEmailAndPassword(auth, trimmedEmail, cleanPassword);
+        if (result.user) {
+          addToast("Logged in successfully!", "success");
+          onLoginSuccess();
+          return;
+        }
+      } catch (authError: any) {
+        // If user not found, or invalid-credential, check if they have a pending custom invite matching the credentials
+        if (
+          authError.code === 'auth/user-not-found' || 
+          authError.code === 'auth/invalid-credential' || 
+          authError.code === 'auth/invalid-email' ||
+          authError.code === 'auth/user-disabled'
+        ) {
+          const invitesCol = collection(db, 'invites');
+          const q = query(invitesCol, where('email', '==', trimmedEmail), where('password', '==', cleanPassword));
+          const snap = await getDocs(q);
+
+          let foundInvite: any = null;
+          for (const d of snap.docs) {
+            const data = d.data();
+            if (!data.usedAt) {
+              foundInvite = { id: d.id, ...data };
+              break;
+            }
+          }
+
+          if (foundInvite) {
+            // Found a matching unused invite. Provision their account.
+            const signupResult = await createUserWithEmailAndPassword(auth, trimmedEmail, cleanPassword);
+            const newUser = signupResult.user;
+
+            // Mark invite as used
+            await updateDoc(doc(db, 'invites', foundInvite.id), {
+              usedAt: serverTimestamp(),
+              usedBy: newUser.uid
+            });
+
+            // Create admin profile matching the invite role
+            await setDoc(doc(db, 'admins', newUser.uid), {
+              email: trimmedEmail,
+              name: foundInvite.name || trimmedEmail.split('@')[0],
+              role: foundInvite.role || 'editor',
+              status: 'Active',
+              invitedBy: foundInvite.id,
+              assignedAt: serverTimestamp(),
+              photoURL: ''
+            });
+
+            addToast("Account registered and logged in successfully!", "success");
+            onLoginSuccess();
+            return;
+          }
+        }
+        // If we didn't find a matching invite, throw the original auth error
+        throw authError;
+      }
+    } catch (e: any) {
+      let friendlyMessage = e.message || "Authentication failed.";
+      if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential') {
+        friendlyMessage = "Incorrect email or password. Please verify your credentials and try again.";
+      } else if (e.code === 'auth/user-not-found') {
+        friendlyMessage = "No registered account or pending invite found with this email.";
+      } else if (e.code === 'auth/weak-password') {
+        friendlyMessage = "The password generated is too weak. Please contact an administrator.";
+      }
+      addToast(friendlyMessage, 'error');
+    } finally {
+      setSigningIn(false);
+    }
+  };
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950 p-4 transition-colors">
       <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-xl dark:border-zinc-800 dark:bg-zinc-900">
@@ -444,11 +605,60 @@ function LoginScreen({ onLoginSuccess, addToast }: { onLoginSuccess: () => void,
           <ChurchLogo className="h-16 w-16" />
           <div>
             <h1 className="font-display text-2xl font-extrabold tracking-tight text-slate-900 dark:text-zinc-50">KCF Calendar Portal</h1>
-            <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1">Sign in with your Google account to access your calendar dashboard</p>
+            <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1">Sign in with your email or Google account to access your calendar dashboard</p>
           </div>
         </div>
 
-        <div className="mt-8 space-y-4">
+        {/* Email & Password Form */}
+        <form onSubmit={handleEmailSignIn} className="mt-8 space-y-4">
+          <div className="space-y-1">
+            <label htmlFor="email" className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+              Email Address
+            </label>
+            <input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="name@example.com"
+              required
+              disabled={signingIn}
+              className="w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm text-slate-900 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50 dark:focus:border-sky-400"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label htmlFor="password" className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+              Password
+            </label>
+            <input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              required
+              disabled={signingIn}
+              className="w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm text-slate-900 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50 dark:focus:border-sky-400"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={signingIn}
+            className="flex w-full items-center justify-center rounded-lg bg-[#0091ff] px-4 py-2.5 text-sm font-semibold text-white shadow hover:bg-[#007ee6] active:scale-[0.98] transition-all disabled:opacity-50"
+          >
+            {signingIn ? "Please wait..." : "Sign In with Email & Password"}
+          </button>
+        </form>
+
+        <div className="my-6 flex items-center justify-center gap-3">
+          <div className="h-[1px] flex-1 bg-slate-200 dark:bg-zinc-800"></div>
+          <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">or</span>
+          <div className="h-[1px] flex-1 bg-slate-200 dark:bg-zinc-800"></div>
+        </div>
+
+        <div className="space-y-4">
           <button 
             onClick={handleSignIn}
             disabled={signingIn}
@@ -460,7 +670,7 @@ function LoginScreen({ onLoginSuccess, addToast }: { onLoginSuccess: () => void,
               <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
               <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
             </svg>
-            {signingIn ? "Signing In..." : "Continue with Google"}
+            Continue with Google
           </button>
 
           <button 
@@ -485,6 +695,15 @@ function AcceptInviteView({ token, onAccept }: { token: string, onAccept: (role:
       // Validate invite doc in firestore
       try {
         const inviteRef = doc(db, 'invites', token);
+        const inviteSnap = await getDoc(inviteRef);
+        let role = 'editor';
+        let name = '';
+        if (inviteSnap.exists()) {
+          const invData = inviteSnap.data();
+          role = invData.role || 'editor';
+          name = invData.name || '';
+        }
+
         // We write usedAt and relate it to current auth user.
         await updateDoc(inviteRef, {
           usedAt: serverTimestamp(),
@@ -497,7 +716,11 @@ function AcceptInviteView({ token, onAccept }: { token: string, onAccept: (role:
           await setDoc(adminDocRef, {
             email: auth.currentUser.email,
             invitedBy: token,
-            assignedAt: serverTimestamp()
+            assignedAt: serverTimestamp(),
+            role: role,
+            name: name,
+            status: 'Active',
+            photoURL: auth.currentUser.photoURL || ''
           });
         }
         setState('success');
@@ -732,22 +955,7 @@ function PublicCalendarView({
                 </button>
               ) : (
                 <button 
-                  onClick={async () => {
-                    try {
-                      const loggedUser = await signInWithGooglePopup();
-                      if (loggedUser) {
-                        addToast(`Signed in successfully as ${loggedUser.displayName || loggedUser.email}!`, 'success');
-                        const adminStatus = await setupAdminProfileIfRequired(loggedUser);
-                        if (adminStatus) {
-                          window.location.hash = "#/dashboard";
-                        } else {
-                          addToast("You are logged in, but your account is not an admin. Contact an administrator for invite routing.", 'info');
-                        }
-                      }
-                    } catch (err: any) {
-                      addToast(err.message || "Google Authentication failed.", 'error');
-                    }
-                  }}
+                  onClick={() => { window.location.hash = "#/dashboard"; }}
                   style={{ display: "flex", alignItems: "center", gap: "0.35rem", padding: "0 0.75rem", height: 34, borderRadius: "var(--radius)", border: "1px solid hsl(var(--color-border))", background: "hsl(var(--color-surface-offset, var(--color-surface)))", color: "hsl(var(--color-text-muted))", fontSize: "0.8rem", fontWeight: 500, cursor: "pointer", flexShrink: 0 }}
                 >
                   <Lock className="h-3.5 w-3.5 text-slate-400" />
@@ -917,6 +1125,7 @@ function PublicCalendarView({
 // ── SHAREABLE SUB-COMPONENT: Admin Dashboard Sidebar ──
 function AdminSidebar({
   user,
+  userRole = 'admin',
   logout,
   theme,
   setTheme,
@@ -984,40 +1193,51 @@ function AdminSidebar({
             </div>
           </div>
 
-          <div>
-            <h2 className="text-[10px] tracking-widest uppercase text-slate-500 font-bold mb-3 px-3">
-              Admin
-            </h2>
-            <div className="flex flex-col gap-1">
-              {/* Users */}
-              <button
-                onClick={() => { window.location.hash = "#/admin-users"; setMobileMenuOpen(false); }}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium tracking-tight transition duration-200 text-left cursor-pointer ease-in-out ${
-                  (hash === "#/admin-users")
-                    ? 'bg-[#1e293b] text-white shadow-xs border border-[#1e293b]'
-                    : 'text-slate-400 hover:text-white hover:bg-[#1e293b]/40'
-                }`}
-              >
-                <Users className="h-3.5 w-3.5 shrink-0 text-slate-400 group-hover:text-white" />
-                <span>Users</span>
-              </button>
+          {userRole !== 'editor' && (
+            <div>
+              <h2 className="text-[10px] tracking-widest uppercase text-slate-500 font-bold mb-3 px-3">
+                Admin
+              </h2>
+              <div className="flex flex-col gap-1">
+                {/* Users */}
+                <button
+                  onClick={() => { window.location.hash = "#/admin-users"; setMobileMenuOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium tracking-tight transition duration-200 text-left cursor-pointer ease-in-out ${
+                    (hash === "#/admin-users")
+                      ? 'bg-[#1e293b] text-white shadow-xs border border-[#1e293b]'
+                      : 'text-slate-400 hover:text-white hover:bg-[#1e293b]/40'
+                  }`}
+                >
+                  <Users className="h-3.5 w-3.5 shrink-0 text-slate-400 group-hover:text-white" />
+                  <span>Users</span>
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
 
       {/* Profile area & Sign out */}
       <div className="flex flex-col gap-3 pt-5 border-t border-[#1e293b]/45">
         <div className="flex items-center gap-2.5 px-1">
-          <div className="h-8 w-8 rounded-full bg-[#1e293b] text-[#0091ff] flex items-center justify-center font-bold text-xs select-none uppercase shadow-inner shrink-0 border border-[#1e293b]/50">
-            {user.email ? user.email.slice(0, 1) : 'A'}
-          </div>
+          {user.photoURL ? (
+            <img 
+              src={user.photoURL} 
+              alt={user.displayName || "Avatar"} 
+              className="h-8 w-8 rounded-full shrink-0 border border-[#1e293b]/50"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div className="h-8 w-8 rounded-full bg-[#1e293b] text-[#0091ff] flex items-center justify-center font-bold text-xs select-none uppercase shadow-inner shrink-0 border border-[#1e293b]/50">
+              {user.email ? user.email.slice(0, 1) : 'A'}
+            </div>
+          )}
           <div className="min-w-0 flex-1">
             <p className="text-xs font-semibold text-slate-200 truncate leading-none">
               {user.displayName || "Administrator"}
             </p>
-            <span className="text-[10px] text-slate-500 font-semibold tracking-wide block mt-1">
-              Admin Access
+            <span className="text-[10px] text-[#0091ff] font-bold tracking-wider block mt-1 uppercase">
+              {userRole === 'owner' ? 'Owner / Creator' : userRole === 'admin' ? 'Administrator' : 'Editor Access'}
             </span>
           </div>
         </div>
@@ -1051,6 +1271,7 @@ function AdminSidebar({
 // ── SUB-COMPONENT: Admin Interactive View ──
 function AdminInteractiveView({
   user,
+  userRole = 'admin',
   events,
   invites,
   selectedMonth,
@@ -1109,6 +1330,7 @@ function AdminInteractiveView({
       {/* Real-time unified Sidebar */}
       <AdminSidebar
         user={user}
+        userRole={userRole}
         logout={logout}
         theme={theme}
         setTheme={setTheme}
@@ -2017,8 +2239,10 @@ function EventEditModal({
 // ── SUB-COMPONENT: Admin Dashboard View (Full Admin Operations) ──
 function AdminDashboardView({
   user,
+  userRole = 'admin',
   events,
   invites,
+  admins = [],
   initialTab = 'events',
   addToast,
   logout,
@@ -2029,7 +2253,7 @@ function AdminDashboardView({
   setCopiedEvent,
   onCopyEvent
 }: any) {
-  const [activeTab, setActiveTab] = useState<'events' | 'invites'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'events' | 'users'>(initialTab);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [csvPreview, setCsvPreview] = useState<any[] | null>(null);
@@ -2037,9 +2261,133 @@ function AdminDashboardView({
   const [activeModal, setActiveModal] = useState<any>(null); // { date, event } or null
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Custom states for refined User Tab
+  const [roleFilter, setRoleFilter] = useState<'all' | 'owner' | 'admin' | 'editor'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'Active' | 'Pending'>('all');
+  
+  // Custom Invite Modal state
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteName, setInviteName] = useState('');
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [invitePassword, setInvitePassword] = useState('');
+  const [inviteRole, setInviteRole] = useState<'admin' | 'editor'>('editor');
+  const [inviteNote, setInviteNote] = useState('');
+  const [generatedInviteUrl, setGeneratedInviteUrl] = useState<string | null>(null);
+  const [generatedInvitePassword, setGeneratedInvitePassword] = useState<string | null>(null);
+
+  // Edit / Role / Transfer States
+  const [editingUser, setEditingUser] = useState<any | null>(null);
+  const [newSelectedRole, setNewSelectedRole] = useState<'admin' | 'editor'>('editor');
+  const [transferTargetEmail, setTransferTargetEmail] = useState('');
+
   useEffect(() => {
     setActiveTab(initialTab);
   }, [initialTab]);
+
+  const handleRevokeUser = async (uid: string, email: string) => {
+    if (uid === user.uid) {
+      addToast("You cannot revoke your own admin access!", "error");
+      return;
+    }
+    if (window.confirm(`Are you sure you want to revoke admin access for ${email}?`)) {
+      try {
+        await deleteDoc(doc(db, 'admins', uid));
+        addToast(`Admin access revoked for ${email}`);
+      } catch (err: any) {
+        addToast("Failed to revoke access: " + err.message, "error");
+      }
+    }
+  };
+
+  const generateRandomPassword = () => {
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let pass = 'KCF-';
+    for (let i = 0; i < 6; i++) {
+      pass += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return pass;
+  };
+
+  const handleOpenInviteModal = () => {
+    setInviteName('');
+    setInviteEmail('');
+    setInvitePassword(generateRandomPassword());
+    setInviteRole('editor');
+    setInviteNote('');
+    setGeneratedInviteUrl(null);
+    setGeneratedInvitePassword(null);
+    setShowInviteModal(true);
+  };
+
+  const handleCreateCustomInviteSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteName.trim() || !inviteEmail.trim() || !invitePassword.trim()) {
+      addToast("Please fill in all required fields (*).", "error");
+      return;
+    }
+    try {
+      const inviteToken = 'inv_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      await setDoc(doc(db, 'invites', inviteToken), {
+        token: inviteToken,
+        createdAt: serverTimestamp(),
+        usedAt: null,
+        usedBy: null,
+        name: inviteName.trim(),
+        email: inviteEmail.toLowerCase().trim(),
+        password: invitePassword.trim(),
+        role: inviteRole,
+        notes: inviteNote.trim(),
+      });
+      
+      const inviteUrl = `${window.location.origin}/#/invite/${inviteToken}`;
+      setGeneratedInviteUrl(inviteUrl);
+      setGeneratedInvitePassword(invitePassword.trim());
+      addToast("Custom user invite created successfully!", "success");
+    } catch (err: any) {
+      addToast(err.message || "Failed to generate custom invite.", 'error');
+    }
+  };
+
+  const handleUpdateUserRole = async (targetUser: any, newRole: 'admin' | 'editor') => {
+    try {
+      const userRef = doc(db, 'admins', targetUser.id);
+      await updateDoc(userRef, { role: newRole });
+      addToast(`Access role for ${targetUser.email} updated to ${newRole}!`, "success");
+      setEditingUser(null);
+    } catch (err: any) {
+      addToast("Failed to update role: " + err.message, "error");
+    }
+  };
+
+  const handleTransferOwnershipSubmit = async (targetUser: any) => {
+    if (!targetUser || !targetUser.email) return;
+    
+    // Safety check: only owners can transfer ownership
+    if (userRole !== 'owner') {
+      addToast("Only the Owner can transfer ownership!", "error");
+      return;
+    }
+
+    if (window.confirm(`CRITICAL WARNING:\n\nAre you sure you want to transfer total ownership to ${targetUser.email}?\n\nOnce complete, you will be demoted to an Admin and lose the ability to transfer ownership.`)) {
+      try {
+        // Demote current owner to admin, and promote target to owner
+        const currentOwnerRef = doc(db, 'admins', user.uid);
+        const targetUserRef = doc(db, 'admins', targetUser.id);
+        
+        await updateDoc(currentOwnerRef, { role: 'admin' });
+        await updateDoc(targetUserRef, { role: 'owner' });
+        
+        addToast(`Ownership successfully transferred to ${targetUser.email}! You are now an Administrator.`, "success");
+        setEditingUser(null);
+        // Let the route refresh
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
+      } catch (err: any) {
+        addToast("Failed to transfer ownership: " + err.message, "error");
+      }
+    }
+  };
 
   // Invite generation mutations
   const handleCreateInviteLink = async () => {
@@ -2126,6 +2474,7 @@ function AdminDashboardView({
       {/* Real-time unified Sidebar */}
       <AdminSidebar
         user={user}
+        userRole={userRole}
         logout={logout}
         theme={theme}
         setTheme={setTheme}
@@ -2326,59 +2675,594 @@ function AdminDashboardView({
               </div>
             </div>
           </div>
-        ) : (
-          <div className="space-y-6">
-            <div className="bg-white dark:bg-[#0d1624] p-6 rounded-xl border border-slate-200 dark:border-slate-800/60 shadow-sm">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-sm font-bold tracking-tight text-slate-900 dark:text-white">Active Single-Use Editor Invites</h3>
-                <button 
-                  onClick={handleCreateInviteLink}
-                  className="px-4 py-2 bg-[#0091ff] hover:bg-[#007ee6] text-white font-semibold text-xs rounded-lg shadow-[0_2px_8px_rgba(0,145,255,0.22)] active:scale-[0.98] transition select-none"
-                >
-                  Create invite link
-                </button>
-              </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Generate links to dispatch to community editors. Once accepted, they can add and edit listings dynamically. Links automatically self-delete upon consumption.</p>
-            </div>
+        ) : (() => {
+          // Compute combined directory
+          const combinedMembers = [
+            ...admins.map((adm: any) => ({
+              id: adm.id,
+              isInvite: false,
+              name: adm.name || (adm.email && adm.email.split('@')[0]) || 'Authorized User',
+              email: adm.email || 'No Email',
+              role: adm.role || (adm.email?.toLowerCase() === 'lucasfarmer2008@gmail.com' ? 'owner' : 'admin'),
+              status: 'Active',
+              photoURL: adm.photoURL || '',
+              invitedAt: adm.assignedAt || adm.seededAt || null,
+              activeAt: adm.activeAt || adm.assignedAt || adm.seededAt || null,
+              notes: adm.notes || '',
+            })),
+            ...invites.filter((inv: any) => !inv.usedAt).map((inv: any) => ({
+              id: inv.id,
+              isInvite: true,
+              name: inv.name || 'Pending Invite',
+              email: inv.email || 'No Email Specified',
+              role: inv.role || 'editor',
+              status: 'Pending',
+              photoURL: '',
+              invitedAt: inv.createdAt || null,
+              activeAt: null,
+              notes: inv.notes || '',
+              token: inv.token,
+              password: inv.password || '',
+            }))
+          ];
 
-            <div className="space-y-3">
-              {invites.map(invite => {
-                const inviteUrl = getInviteUrlString(invite.token);
-                return (
-                  <div key={invite.id} className="bg-white dark:bg-[#0d1624] rounded-lg border border-slate-200 dark:border-slate-800/80 p-4 flex items-center justify-between gap-4 shadow-sm">
-                    <div className="min-w-0 flex-1">
-                      <code className="text-slate-600 dark:text-slate-300 text-xs font-semibold block truncate bg-slate-50 dark:bg-[#111c2a] p-2 rounded border border-slate-200/60 dark:border-slate-800">
-                        {inviteUrl}
-                      </code>
+          // Filter combined directory
+          const filteredMembers = combinedMembers.filter((m: any) => {
+            const matchesRole = roleFilter === 'all' || m.role === roleFilter;
+            const matchesStatus = statusFilter === 'all' || m.status === statusFilter;
+            const matchesSearch = !search.trim() || 
+              m.email.toLowerCase().includes(search.toLowerCase()) || 
+              m.name.toLowerCase().includes(search.toLowerCase());
+            return matchesRole && matchesStatus && matchesSearch;
+          });
+
+          const formatAdminDate = (ts: any) => {
+            if (!ts) return "Never";
+            if (ts.toDate) return ts.toDate().toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+            if (ts.seconds) return new Date(ts.seconds * 1000).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+            return new Date(ts).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+          };
+
+          return (
+            <div className="space-y-6">
+              {/* Header card with Invitation Launchpad */}
+              <div className="bg-white dark:bg-[#0d1624] p-6 rounded-2xl border border-slate-200/50 dark:border-slate-800/60 flex flex-col md:flex-row gap-5 items-start md:items-center justify-between shadow-[0_4px_20px_rgba(15,23,42,0.02)]">
+                <div className="flex gap-4 items-start">
+                  <div className="h-12 w-12 rounded-xl bg-blue-50 dark:bg-blue-950/30 flex items-center justify-center shrink-0 text-[#0091ff]">
+                    <Shield className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-slate-900 dark:text-zinc-50 tracking-tight">
+                      Users & Access Control
+                    </h2>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-xl">
+                      Invite colleagues, configure role permissions, and manage console access controls securely. Only owners and administrators can dispatch invites.
+                    </p>
+                  </div>
+                </div>
+                {userRole !== 'editor' && (
+                  <button 
+                    onClick={handleOpenInviteModal}
+                    className="w-full md:w-auto h-11 px-5 flex items-center justify-center gap-2 rounded-xl bg-[#0091ff] text-white hover:bg-[#007ee6] text-xs font-semibold tracking-tight shadow-[0_2px_8px_rgba(0,145,255,0.22)] hover:shadow-[0_4px_12px_rgba(0,145,255,0.32)] transition-all duration-200 active:scale-[0.98] cursor-pointer"
+                  >
+                    <UserPlus className="h-4 w-4" /> Invite User
+                  </button>
+                )}
+              </div>
+
+              {/* Filtering Controls & Live Stats */}
+              <div className="bg-white dark:bg-[#0d1624] p-4 rounded-xl border border-slate-200/50 dark:border-slate-800/60 flex flex-col sm:flex-row gap-4 items-center justify-between shadow-xs">
+                <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+                  {/* Search inside Directory */}
+                  <div className="relative w-full sm:w-64">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+                    <input 
+                      type="text" 
+                      placeholder="Filter by name or email..." 
+                      value={search}
+                      onChange={e => setSearch(e.target.value)}
+                      className="w-full pl-9 pr-3 h-9 border rounded-lg bg-slate-50/50 dark:bg-[#111c2a] border-slate-200/60 dark:border-slate-800 outline-none text-xs text-slate-800 dark:text-white focus:bg-white dark:focus:bg-[#162231] focus:border-[#0091ff]/80 transition"
+                    />
+                  </div>
+
+                  {/* Role filter */}
+                  <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-[#111c2a] border border-slate-200/50 dark:border-slate-800/80 px-2.5 h-9 rounded-lg">
+                    <span className="text-[10px] text-slate-450 dark:text-slate-500 font-bold tracking-wider uppercase">Role:</span>
+                    <select
+                      value={roleFilter}
+                      onChange={e => setRoleFilter(e.target.value as any)}
+                      className="bg-transparent text-xs font-semibold text-slate-700 dark:text-slate-350 outline-none cursor-pointer pr-1"
+                    >
+                      <option value="all">All Roles</option>
+                      <option value="owner">Owner</option>
+                      <option value="admin">Admin</option>
+                      <option value="editor">Editor</option>
+                    </select>
+                  </div>
+
+                  {/* Status filter */}
+                  <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-[#111c2a] border border-slate-200/50 dark:border-slate-800/80 px-2.5 h-9 rounded-lg">
+                    <span className="text-[10px] text-slate-450 dark:text-slate-500 font-bold tracking-wider uppercase">Status:</span>
+                    <select
+                      value={statusFilter}
+                      onChange={e => setStatusFilter(e.target.value as any)}
+                      className="bg-transparent text-xs font-semibold text-slate-700 dark:text-slate-350 outline-none cursor-pointer pr-1"
+                    >
+                      <option value="all">All Statuses</option>
+                      <option value="Active">Active</option>
+                      <option value="Pending">Pending</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="shrink-0">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-[#111c2a] border border-slate-200/50 dark:border-slate-800/80 text-slate-600 dark:text-slate-400">
+                    Count: {filteredMembers.length} / {combinedMembers.length} Records
+                  </span>
+                </div>
+              </div>
+
+              {/* Directory directory table */}
+              <div className="bg-white dark:bg-[#0d1624] rounded-2xl border border-slate-200/50 dark:border-slate-800/60 overflow-hidden shadow-[0_4px_20px_rgba(15,23,42,0.02)]">
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-[#111c2a] text-slate-400 dark:text-slate-500 font-semibold uppercase tracking-widest text-[9px] select-none">
+                        <th className="px-6 py-4">User Details</th>
+                        <th className="px-6 py-4">Access Role</th>
+                        <th className="px-6 py-4">Invited Status</th>
+                        <th className="px-6 py-4">Activity Times</th>
+                        <th className="px-6 py-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100/50 dark:divide-slate-800/60">
+                      {filteredMembers.map((m: any) => {
+                        const isSelf = m.id === user.uid;
+                        const isOwner = m.role === 'owner';
+                        
+                        // Access level controls
+                        // Owner can edit anyone (except themselves)
+                        // Admin can edit editors/admins, but NOT owners
+                        const canModify = !isSelf && (
+                          userRole === 'owner' || 
+                          (userRole === 'admin' && m.role !== 'owner')
+                        );
+
+                        return (
+                          <tr key={m.id} className="hover:bg-slate-50/25 dark:hover:bg-[#111c2a]/20 transition duration-150">
+                            {/* User Details */}
+                            <td className="px-6 py-4.5">
+                              <div className="flex items-center gap-3">
+                                {m.photoURL ? (
+                                  <img 
+                                    src={m.photoURL} 
+                                    alt={m.name} 
+                                    className="h-8 w-8 rounded-full border border-slate-150 dark:border-slate-800"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : (
+                                  <div className="h-8 w-8 rounded-full bg-slate-100 dark:bg-[#111c2a] flex items-center justify-center font-bold text-xs text-[#0091ff] select-none border border-slate-200/40 dark:border-slate-800">
+                                    {m.email ? m.email.slice(0, 2).toUpperCase() : 'PE'}
+                                  </div>
+                                )}
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-semibold text-slate-800 dark:text-white text-xs truncate max-w-[150px]">
+                                      {m.name}
+                                    </span>
+                                    {isSelf && (
+                                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[8px] font-bold bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 border border-emerald-100 dark:border-emerald-900/30 uppercase tracking-wider select-none">
+                                        You
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="text-2xs text-slate-450 dark:text-slate-500 font-mono block mt-0.5 max-w-[200px] truncate" title={m.email}>
+                                    {m.email}
+                                  </span>
+                                  {m.notes && (
+                                    <span className="text-[10px] text-slate-400 italic block mt-1 max-w-[220px] truncate">
+                                      Note: "{m.notes}"
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* Access Role */}
+                            <td className="px-6 py-4.5">
+                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-medium text-[10px] border tracking-tight select-none ${
+                                m.role === 'owner' 
+                                  ? 'bg-purple-50/40 dark:bg-purple-950/10 border-purple-100 dark:border-purple-900/40 text-purple-600 dark:text-purple-400 font-bold'
+                                  : m.role === 'admin'
+                                  ? 'bg-blue-50/40 dark:bg-blue-950/10 border-blue-100 dark:border-blue-900/40 text-[#0091ff] font-semibold'
+                                  : 'bg-teal-50/40 dark:bg-teal-950/10 border-teal-100 dark:border-teal-900/40 text-teal-600 dark:text-teal-400 font-semibold'
+                              }`}>
+                                <span className={`h-1.5 w-1.5 rounded-full ${m.role === 'owner' ? 'bg-purple-500' : m.role === 'admin' ? 'bg-[#0091ff]' : 'bg-teal-500'}`} />
+                                {m.role === 'owner' ? 'Owner' : m.role === 'admin' ? 'Admin' : 'Editor'}
+                              </span>
+                            </td>
+
+                            {/* Invited Status */}
+                            <td className="px-6 py-4.5">
+                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold tracking-tight border select-none ${
+                                m.status === 'Active'
+                                  ? 'bg-emerald-50/20 border-emerald-100/50 dark:border-emerald-950/30 text-emerald-600 dark:text-emerald-400'
+                                  : 'bg-amber-50/20 border-amber-100/50 dark:border-amber-950/30 text-amber-600 dark:text-amber-400'
+                              }`}>
+                                <span className={`h-1.5 w-1.5 rounded-full ${m.status === 'Active' ? 'bg-emerald-500' : 'bg-amber-400'}`} />
+                                {m.status}
+                              </span>
+                              {m.status === 'Pending' && m.password && (
+                                <div className="text-[10px] text-slate-450 font-mono mt-1">
+                                  PW: <span className="font-semibold text-slate-600 dark:text-slate-300">{m.password}</span>
+                                </div>
+                              )}
+                            </td>
+
+                            {/* Activity Times */}
+                            <td className="px-6 py-4.5 text-slate-500 dark:text-slate-400">
+                              <div className="space-y-0.5 leading-none">
+                                <div className="text-[10px]">
+                                  <span className="text-slate-400 font-medium">Invited: </span>
+                                  <span className="font-semibold text-slate-600 dark:text-slate-300">{formatAdminDate(m.invitedAt)}</span>
+                                </div>
+                                <div className="text-[10px]">
+                                  <span className="text-slate-400 font-medium">Active: </span>
+                                  <span className="font-semibold text-slate-600 dark:text-slate-300">
+                                    {m.status === 'Pending' ? 'Pending Acceptance' : formatAdminDate(m.activeAt)}
+                                  </span>
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* Actions */}
+                            <td className="px-6 py-4.5 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                {/* If pending invite, allow copying URL */}
+                                {m.isInvite && (
+                                  <button 
+                                    onClick={() => {
+                                      const invUrl = `${window.location.origin}/#/invite/${m.token}`;
+                                      navigator.clipboard.writeText(invUrl);
+                                      addToast("Invite Link copied to clipboard!", "success");
+                                    }}
+                                    className="px-2.5 py-1 text-[10px] font-bold rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111c2a] hover:bg-slate-50 dark:hover:bg-[#162231] text-slate-600 dark:text-slate-300 transition-all cursor-pointer"
+                                    title="Copy Invitation Link"
+                                  >
+                                    Copy Link
+                                  </button>
+                                )}
+
+                                {/* Edit Role Button */}
+                                {canModify && (
+                                  <button 
+                                    onClick={() => {
+                                      setEditingUser(m);
+                                      setNewSelectedRole(m.role === 'owner' ? 'admin' : m.role);
+                                    }}
+                                    className="px-2.5 py-1 text-[10px] font-bold rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111c2a] hover:bg-slate-50 dark:hover:bg-[#162231] text-slate-600 dark:text-slate-300 transition-all cursor-pointer"
+                                  >
+                                    Edit Role
+                                  </button>
+                                )}
+
+                                {/* Delete / Revoke Action */}
+                                {canModify && (
+                                  <button 
+                                    onClick={() => {
+                                      if (m.isInvite) {
+                                        handleDeleteInvite(m.id);
+                                      } else {
+                                        handleRevokeUser(m.id, m.email);
+                                      }
+                                    }}
+                                    className="px-2.5 py-1 text-[10px] font-bold rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/20 text-red-600 hover:bg-red-100 hover:text-red-700 transition-all cursor-pointer"
+                                  >
+                                    {m.isInvite ? 'Delete Invite' : 'Revoke'}
+                                  </button>
+                                )}
+
+                                {!canModify && (
+                                  <span className="text-[10px] text-slate-400 italic">Protected</span>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+
+                      {filteredMembers.length === 0 && (
+                        <tr>
+                          <td colSpan={5} className="py-12 text-center text-slate-400 dark:text-slate-500 italic">
+                            No users or invites found in directory matching active filters.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* MODAL 1: Invite New Dashboard Member */}
+              {showInviteModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
+                  <div className="w-full max-w-lg bg-white dark:bg-[#0d1624] border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-4 duration-300">
+                    <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800/80 flex justify-between items-center">
+                      <h3 className="font-bold text-slate-900 dark:text-zinc-50 text-sm flex items-center gap-2">
+                        <UserPlus className="h-4.5 w-4.5 text-[#0091ff]" />
+                        Invite New Dashboard Member
+                      </h3>
+                      <button 
+                        onClick={() => setShowInviteModal(false)}
+                        className="p-1.5 hover:bg-slate-100 dark:hover:bg-[#111c2a] rounded-lg text-slate-450 dark:text-slate-500 transition cursor-pointer"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
                     </div>
-                    <div className="flex items-center gap-2">
+
+                    {generatedInviteUrl ? (
+                      /* SUCCESS STATE IN MODAL */
+                      <div className="p-6 space-y-5">
+                        <div className="flex flex-col items-center text-center space-y-2">
+                          <div className="h-12 w-12 rounded-full bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                            <CheckCircle className="h-6 w-6" />
+                          </div>
+                          <h4 className="font-bold text-slate-900 dark:text-zinc-50 text-sm">Invitation Generated Successfully!</h4>
+                          <p className="text-xs text-slate-500 dark:text-slate-450">
+                            The invite is recorded in the directory. Manually copy the login details below to share with your new member.
+                          </p>
+                        </div>
+
+                        <div className="bg-slate-50 dark:bg-[#111c2a] p-4 rounded-xl border border-slate-200/55 dark:border-slate-800 space-y-3 text-xs">
+                          <div className="flex justify-between items-center">
+                            <span className="text-slate-450 font-medium">Invited Name:</span>
+                            <span className="font-bold text-slate-800 dark:text-zinc-200">{inviteName}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-slate-450 font-medium">Username / Email:</span>
+                            <span className="font-bold text-slate-800 dark:text-zinc-200 font-mono">{inviteEmail}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-slate-450 font-medium">Assigned Role:</span>
+                            <span className="font-bold text-[#0091ff] uppercase tracking-wider">{inviteRole}</span>
+                          </div>
+                          <div className="border-t border-slate-200/50 dark:border-slate-800/60 pt-3 flex justify-between items-center gap-3">
+                            <div>
+                              <span className="text-slate-450 font-medium block">Login Password:</span>
+                              <code className="font-bold text-slate-800 dark:text-zinc-200 font-mono text-sm">{generatedInvitePassword}</code>
+                            </div>
+                            <button 
+                              onClick={() => {
+                                if (generatedInvitePassword) {
+                                  navigator.clipboard.writeText(generatedInvitePassword);
+                                  addToast("Temporary login password copied!", "success");
+                                }
+                              }}
+                              className="px-2.5 py-1 text-2xs font-bold rounded bg-[#0091ff]/10 hover:bg-[#0091ff]/20 text-[#0091ff] border border-[#0091ff]/20 transition cursor-pointer"
+                            >
+                              Copy
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Manual Invitation Link:</label>
+                          <div className="flex gap-2">
+                            <code className="flex-1 p-2 bg-slate-50 dark:bg-[#111c2a] rounded-lg border border-slate-200/60 dark:border-slate-800 text-slate-600 dark:text-slate-350 font-mono text-[11px] truncate">
+                              {generatedInviteUrl}
+                            </code>
+                            <button 
+                              onClick={() => {
+                                navigator.clipboard.writeText(generatedInviteUrl);
+                                addToast("Invitation link copied to clipboard!", "success");
+                              }}
+                              className="px-3.5 py-2 bg-[#0091ff] hover:bg-[#007ee6] text-white font-semibold rounded-lg text-xs transition cursor-pointer"
+                            >
+                              Copy Link
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="pt-2 flex justify-end">
+                          <button 
+                            onClick={() => setShowInviteModal(false)}
+                            className="px-5 py-2 bg-slate-100 dark:bg-[#111c2a] hover:bg-slate-200 dark:hover:bg-[#162231] text-slate-700 dark:text-slate-200 font-semibold rounded-xl text-xs transition cursor-pointer"
+                          >
+                            Done
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      /* INPUT FORM STATE IN MODAL */
+                      <form onSubmit={handleCreateCustomInviteSubmit} className="p-6 space-y-4 text-left">
+                        {/* Full Name */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-450 dark:text-slate-400 uppercase tracking-widest block">
+                            User's Full Name *
+                          </label>
+                          <input 
+                            type="text" 
+                            required
+                            placeholder="e.g. John Doe"
+                            value={inviteName}
+                            onChange={e => setInviteName(e.target.value)}
+                            className="w-full px-3 h-10 border rounded-lg bg-slate-50/50 dark:bg-[#111c2a] border-slate-200/60 dark:border-slate-800 outline-none text-xs text-slate-800 dark:text-white focus:bg-white focus:border-[#0091ff]/85 transition"
+                          />
+                        </div>
+
+                        {/* Email Address */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-450 dark:text-slate-400 uppercase tracking-widest block">
+                            Username or Email Address *
+                          </label>
+                          <input 
+                            type="email" 
+                            required
+                            placeholder="e.g. user@example.com"
+                            value={inviteEmail}
+                            onChange={e => setInviteEmail(e.target.value)}
+                            className="w-full px-3 h-10 border rounded-lg bg-slate-50/50 dark:bg-[#111c2a] border-slate-200/60 dark:border-slate-800 outline-none text-xs text-slate-800 dark:text-white focus:bg-white focus:border-[#0091ff]/85 transition"
+                          />
+                        </div>
+
+                        {/* Login Password Creator */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-450 dark:text-slate-400 uppercase tracking-widest block">
+                            Create Login Password *
+                          </label>
+                          <div className="flex gap-2">
+                            <input 
+                              type="text" 
+                              required
+                              value={invitePassword}
+                              onChange={e => setInvitePassword(e.target.value)}
+                              className="flex-1 px-3 h-10 border rounded-lg bg-slate-50/50 dark:bg-[#111c2a] border-slate-200/60 dark:border-slate-800 outline-none text-xs text-slate-800 dark:text-white font-mono focus:bg-white focus:border-[#0091ff]/85 transition"
+                            />
+                            <button 
+                              type="button"
+                              onClick={() => setInvitePassword(generateRandomPassword())}
+                              className="h-10 px-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-50 dark:bg-[#111c2a] hover:bg-slate-100 text-slate-600 dark:text-slate-350 transition flex items-center justify-center gap-1.5 text-xs font-semibold cursor-pointer"
+                              title="Regenerate password"
+                            >
+                              <RefreshCw className="h-3.5 w-3.5" />
+                              <span>Regenerate</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Role Dropdown Selector */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-450 dark:text-slate-400 uppercase tracking-widest block">
+                            Dashboard Role Permissions *
+                          </label>
+                          <select
+                            value={inviteRole}
+                            onChange={e => setInviteRole(e.target.value as any)}
+                            className="w-full px-3 h-10 border rounded-lg bg-slate-50/50 dark:bg-[#111c2a] border-slate-200/60 dark:border-slate-800 outline-none text-xs text-slate-800 dark:text-white focus:bg-white focus:border-[#0091ff]/85 transition cursor-pointer"
+                          >
+                            <option value="editor">Editor (Can create and edit calendar events)</option>
+                            <option value="admin">Admin (Can invite users, manage permissions, edit calendar)</option>
+                          </select>
+                        </div>
+
+                        {/* Optional Notes */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-450 dark:text-slate-400 uppercase tracking-widest block">
+                            Note (Optional)
+                          </label>
+                          <textarea 
+                            rows={2}
+                            placeholder="e.g. Freelance marketing copywriter..."
+                            value={inviteNote}
+                            onChange={e => setInviteNote(e.target.value)}
+                            className="w-full p-3 border rounded-lg bg-slate-50/50 dark:bg-[#111c2a] border-slate-200/60 dark:border-slate-800 outline-none text-xs text-slate-800 dark:text-white focus:bg-white focus:border-[#0091ff]/85 transition resize-none"
+                          />
+                        </div>
+
+                        <div className="bg-blue-50/40 dark:bg-blue-950/10 p-3.5 rounded-xl border border-blue-100/60 dark:border-blue-900/30 text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                          No automatic emails will be dispatched to this address. An invitation URL will be generated next for you to copy and send manually.
+                        </div>
+
+                        <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 flex justify-end gap-2.5">
+                          <button 
+                            type="button"
+                            onClick={() => setShowInviteModal(false)}
+                            className="px-4.5 py-2.5 border dark:border-slate-800 hover:bg-slate-50 text-xs font-semibold rounded-lg text-slate-600 dark:text-slate-300 transition cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                          <button 
+                            type="submit"
+                            className="px-5 py-2.5 bg-[#0091ff] hover:bg-[#007ee6] text-white font-semibold rounded-lg text-xs shadow-md transition cursor-pointer"
+                          >
+                            Create & Get Link
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* MODAL 2: Edit Access Role & Transfer Ownership (Danger Zone) */}
+              {editingUser && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
+                  <div className="w-full max-w-md bg-white dark:bg-[#0d1624] border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden text-left animate-in slide-in-from-bottom-4 duration-300">
+                    <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800/80 flex justify-between items-center">
+                      <h3 className="font-bold text-slate-900 dark:text-zinc-50 text-sm flex items-center gap-1.5">
+                        <Shield className="h-4 w-4 text-[#0091ff]" />
+                        Configure Member Access: {editingUser.email}
+                      </h3>
                       <button 
-                        onClick={() => {
-                          navigator.clipboard.writeText(inviteUrl);
-                          addToast("Invite URL copied to clipboard!");
-                        }}
-                        className="p-2 border border-slate-200 dark:border-slate-800 rounded bg-white dark:bg-[#111c2a] hover:bg-slate-50 dark:hover:bg-[#1c2a3d] text-slate-600 dark:text-slate-300 cursor-pointer"
-                        title="Copy to clipboard"
+                        onClick={() => setEditingUser(null)}
+                        className="p-1.5 hover:bg-slate-100 dark:hover:bg-[#111c2a] rounded-lg text-slate-450 dark:text-slate-500 transition cursor-pointer"
                       >
-                        <Copy className="h-4 w-4" />
+                        <X className="h-4 w-4" />
                       </button>
-                      <button 
-                        onClick={() => handleDeleteInvite(invite.id)}
-                        className="p-2 border border-red-200 dark:border-red-900/40 text-red-500 dark:text-red-400 bg-red-50 dark:bg-red-950/20 hover:bg-red-100 dark:hover:bg-red-950/40 rounded transition cursor-pointer"
-                        title="Delete Invite"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                    </div>
+
+                    <div className="p-6 space-y-6">
+                      {/* Only show role selector if the editing user is not the owner */}
+                      {editingUser.role !== 'owner' && (
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-450 dark:text-slate-400 uppercase tracking-widest block">
+                            Assign Access Privilege Level
+                          </label>
+                          <select
+                            value={newSelectedRole}
+                            onChange={e => setNewSelectedRole(e.target.value as any)}
+                            className="w-full px-3 h-10 border rounded-lg bg-slate-50/50 dark:bg-[#111c2a] border-slate-200/60 dark:border-slate-800 outline-none text-xs text-slate-800 dark:text-white focus:bg-white focus:border-[#0091ff]/85 transition cursor-pointer"
+                          >
+                            <option value="editor">Editor (Can only edit/create calendar events)</option>
+                            <option value="admin">Administrator (Can invite users & manage roles)</option>
+                          </select>
+                        </div>
+                      )}
+
+                      {/* DANGER ZONE: Ownership Transfer (Only accessible if current logged-in user is Owner, and targeting an active registered user) */}
+                      {userRole === 'owner' && !editingUser.isInvite && editingUser.role !== 'owner' && (
+                        <div className="p-4 bg-red-50/40 dark:bg-red-950/10 border border-red-150/55 dark:border-red-900/30 rounded-xl space-y-3.5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-red-600 dark:text-red-400 font-bold uppercase tracking-wider text-2xs block">
+                              👑 Permanent Ownership Transfer
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-550 dark:text-slate-400 leading-relaxed">
+                            Relinquish total 100% account ownership of this console permanently to <span className="font-bold text-slate-800 dark:text-zinc-200">{editingUser.email}</span>. You will be instantly demoted to an Administrator. This transfer is permanent and cannot be undone.
+                          </p>
+                          <button 
+                            type="button"
+                            onClick={() => handleTransferOwnershipSubmit(editingUser)}
+                            className="w-full py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg text-xs shadow-sm hover:shadow-md transition cursor-pointer text-center"
+                          >
+                            Transfer Ownership to {editingUser.name}
+                          </button>
+                        </div>
+                      )}
+
+                      <div className="flex justify-end gap-2.5 pt-4 border-t border-slate-100 dark:border-slate-800/80">
+                        <button 
+                          onClick={() => setEditingUser(null)}
+                          className="px-4.5 py-2.5 border dark:border-slate-800 hover:bg-slate-50 text-xs font-semibold rounded-lg text-slate-600 dark:text-slate-300 transition cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        {editingUser.role !== 'owner' && (
+                          <button 
+                            onClick={() => handleUpdateUserRole(editingUser, newSelectedRole)}
+                            className="px-5 py-2.5 bg-[#0091ff] hover:bg-[#007ee6] text-white font-semibold rounded-lg text-xs shadow-md transition cursor-pointer"
+                          >
+                            Save Changes
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
-                );
-              })}
-              {invites.length === 0 && (
-                <p className="text-xs text-center text-slate-400 dark:text-slate-500 italic py-6">No pending invite links available in database.</p>
+                </div>
               )}
             </div>
-          </div>
-        )}
+          );
+        })()}
       </main>
       </div>
 

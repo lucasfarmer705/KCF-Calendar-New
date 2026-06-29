@@ -62,10 +62,11 @@ service cloud.firestore {
 
     // 2. Admins collection matches
     match /admins/{uid} {
-      allow read: if isSignedIn();
+      allow read: if true;
       // Block privilege escalation: Users can only write their admin record if they are the bootstrapped admin
-      // OR if they provide a valid invite that was consumed by them
+      // OR if they provide a valid invite that was consumed by them. Existing admins can write/delete to manage users.
       allow write: if isSignedIn() && (
+        isAdmin() ||
         ((request.auth.token.email == 'lucasfarmer2008@gmail.com' || request.auth.token.email == 'Lucasfarmer2008@gmail.com') && request.auth.uid == uid) ||
         (
           request.auth.uid == uid &&
@@ -78,7 +79,7 @@ service cloud.firestore {
 
     // 3. Invites collection matches
     match /invites/{token} {
-      allow read: if isAdmin();
+      allow read: if true;
       allow delete: if isAdmin();
       allow create: if isAdmin() && 
         isValidInvite(request.resource.data) &&
